@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <SPI.h>
 #include <RH_NRF24.h>
+#include <../../shared/shared_structs.h>
 
 // Define Joystick Connections
 #define JOY_VERT_PIN A0 
@@ -19,12 +20,6 @@ struct ButtonWDebounce {
   ButtonWDebounce(int pin, boolean negated) : pin(pin), negated(negated) {}
 };
 
-struct CarControlData {
-  boolean remoteControlMode;
-  byte speedLeft;
-  byte speedRight;
-  byte direction;
-};
 
 
 int joyposVert = 512;

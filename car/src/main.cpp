@@ -4,6 +4,7 @@
 #include <constants.h>
 #include <SPI.h>
 #include <RH_NRF24.h>
+#include <../../shared/shared_structs.h>
 
 
 struct MotorConfig {
@@ -13,11 +14,6 @@ struct MotorConfig {
   MotorConfig(int pwm, int fw, int bw) : pwmPin(pwm), forwardPin(fw), backwardPin(bw) {}
 };
 
-struct CarState {
-  boolean autonomousMode = false;
-  boolean obstacleDetected = false;
-  int obstacleSolutionAttempts = 0;
-};
 
 const int obstacleDist = 50;
 

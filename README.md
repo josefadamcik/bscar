@@ -1,4 +1,4 @@
-# bscar - Barely Smart Car
+# bscar - Barely Smart Carm
 
 This is my undergoing hobby toy project of smart toy car driven by Arduino micro controller, which communicates with another Arduino wirelessly.
 
