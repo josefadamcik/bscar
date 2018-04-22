@@ -5,10 +5,6 @@
 #include <SPI.h>
 #include <RH_NRF24.h>
 
-RH_NRF24 radio;
-
-
-const int obstacleDist = 50;
 
 struct MotorConfig {
   int pwmPin;
@@ -23,6 +19,9 @@ struct CarState {
   int obstacleSolutionAttempts = 0;
 };
 
+const int obstacleDist = 50;
+
+RH_NRF24 radio;
 CarState carState;
 
 MotorConfig leftMotor = MotorConfig(3, 4, 2);
