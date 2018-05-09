@@ -3,8 +3,6 @@
 #include <NewPing.h>
 #include <constants.h>
 #include <SPI.h>
-#include <RH_NRF24.h>
-#include <RHReliableDatagram.h>
 #include <../../shared/shared_structs.h>
 
 
@@ -18,22 +16,16 @@ struct MotorConfig {
 
 const int obstacleDist = 50;
 
-// RH_NRF24 nrf24;
-// RHReliableDatagram radio(nrf24, CAR_ADDRESS);
 CarState carState;
 
-// MotorConfig leftMotor = MotorConfig(3, 4, 2);
-// MotorConfig rightMotor = MotorConfig(5, 7, 6);
-
-MotorConfig leftMotor = MotorConfig(5, 4, 7);
-MotorConfig rightMotor = MotorConfig(6, 2, 3);
+//with 5 and 6 for pwm the both sides behaves the same, with 3&5 it seemed that one side (pin 3) had lower voltage
+MotorConfig leftMotor = MotorConfig(5, 7, 4);
+MotorConfig rightMotor = MotorConfig(6, 8, 10);
 
 
 Servo headservo;  // create servo object to control a servo
 int pos = 0;    // variable to store the servo position
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
-uint8_t radioBuffer[RH_NRF24_MAX_MESSAGE_LEN];
-uint8_t *radioResponse;
 
 
 void motor_init(MotorConfig &motor) {
@@ -56,47 +48,28 @@ MotorState motor_stop(MotorConfig &motor) {
   return MotorState();
 }
 
+volatile unsigned int left_step_count;
+const float stepcount = 20.00;  // 20 Slots in disk, change if different
+const float wheeldiameter = 66.10; // Wheel diameter in millimeters, change if different
+const float wheelcircumference = wheeldiameter * 3.1416;
+ 
+
+void opto_interrupt() {
+  left_step_count++;
+}
+
 
 void setup() {
   // set all the motor control pins to outputs
   motor_init(leftMotor);
   motor_init(rightMotor);
   headservo.attach(HEADSERVO_PIN);  // attaches the servo on pin 9 to the servo object
+  pinMode(OPTO_INTERUPT_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(OPTO_INTERUPT_PIN), opto_interrupt, RISING);
   Serial.begin(9600); 
   pinMode(ONOFF_PIN, INPUT_PULLUP);
   pinMode(DIODE_RED_PIN, OUTPUT);
   pinMode(DIODE_BLUE_PIN, OUTPUT);
-  // if (!radio.init()) {
-  //   Serial.println("init failed");
-  // }
-
-  // radio.setTimeout(500);
-  // radio.setRetries(5);
-
-
-  // Defaults after init are 2.402 GHz (channel 2), 2Mbps, 0dBm
-  if (!nrf24.setChannel(2)) {
-     Serial.println("setChannel failed");
-  }
-    
-  if (!nrf24.setRF(RH_NRF24::DataRate1Mbps, RH_NRF24::TransmitPowerm18dBm)) {
-     Serial.println("setRF failed");   
-  }
-  
-
-  Serial.print("max rf message lenght: ");
-  Serial.println(nrf24.maxMessageLength());
-}
-
-void radio_send_state(CarState &carState) {
-  //unreliable datagram sendto, we don't need ack
-  boolean r = radio.sendto((uint8_t *)&carState, sizeof(struct CarState), REMOTE_ADDRESS);
-  Serial.print("send state: ");
-  Serial.print(r);
-  Serial.print(" size ");
-  Serial.println(sizeof(struct CarState));
-  //Serial.println(r);
-  //radio.waitPacketSent();
 }
 
 
@@ -162,7 +135,7 @@ void obstacle_handle() {
 
   if (max(leftDistance, rightDistance) <= obstacleDist || carState.obstacleSolutionAttempts == MAX_OBSTACLE_DET_ATTEMTPS - 1) {
     //solve by going back a bit
-    car_backward(MIN_SPEED);
+    car_backward(120);
     delay(1000);
     car_stop();
   } else if (rightDistance > obstacleDist) {
@@ -281,48 +254,67 @@ void loop()
 //     digitalWrite(DIODE_BLUE_PIN, LOW);
 //   }
 
-  carState.autonomousMode = !digitalRead(ONOFF_PIN);
-  digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
-  if (carState.autonomousMode)  {
-    // car_forward(MIN_SPEED);
-    // delay(1000);
+  // carState.autonomousMode = !digitalRead(ONOFF_PIN);
+  // digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
+  // if (carState.autonomousMode)  {
+  //   if (carState.obstacleDetected && carState.obstacleSolutionAttempts < MAX_OBSTACLE_DET_ATTEMTPS) {
+  //     obstacle_handle();
+  //   } else if (carState.obstacleDetected && carState.obstacleSolutionAttempts >= MAX_OBSTACLE_DET_ATTEMTPS) {
+  //     //error mode -> just blink with diode
+  //     Serial.println("Unable to hadle obstacle");
+  //     digitalWrite(DIODE_BLUE_PIN, HIGH);
+  //     delay(500);
+  //     digitalWrite(DIODE_BLUE_PIN, LOW);
+  //     delay(500);
+  //   } else {
+  //     //moving
+  //     int distance = head_measure_distance(HEAD_FW);
+  //     if (distance > obstacleDist) {
+  //       carState.obstacleDetected = false;
+  //       car_forward(150);
+  //     } else {
+  //       carState.obstacleDetected = true;
+  //       car_stop();
+
+  //     }
+  //   }
+  //   digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);
+  // } else {
+  //   //stop and reset state
+  //   carState.obstacleDetected = false;
+  //   carState.obstacleSolutionAttempts = 0;
+  //   car_stop();
+  // }
+    carState.autonomousMode = !digitalRead(ONOFF_PIN);
+    digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
+    if (carState.autonomousMode) {
+      for (int i = 100; i <=250; i += 10) {
+        car_forward(i);
+        unsigned int last_steps = left_step_count;
+        delay(500);
+        unsigned int curr_steps = left_step_count;
+        unsigned int diff = curr_steps - last_steps;
+        float rounds = diff / stepcount;
+        float rpm = rounds * 2 * 60; //per minute
+        float cmpm = rpm * wheelcircumference * 10; //mm -> cm
+        Serial.print(i);
+        Serial.print('\t');
+        Serial.print(diff);
+        Serial.print('\t');
+        Serial.print(rounds);
+        Serial.print('\t');
+        Serial.println(cmpm);
+      }
+      
+    }
     // car_stop();
     // car_turn(TURN_LEFT, 700);
-    // car_forward(MIN_SPEED);
+    // 
     // delay(1000);
     // car_stop();
     // car_turn(TURN_RIGTH, 700);
 
-    if (carState.obstacleDetected && carState.obstacleSolutionAttempts < MAX_OBSTACLE_DET_ATTEMTPS) {
-      obstacle_handle();
-    } else if (carState.obstacleDetected && carState.obstacleSolutionAttempts >= MAX_OBSTACLE_DET_ATTEMTPS) {
-      //error mode -> just blink with diode
-      Serial.println("Unable to hadle obstacle");
-      digitalWrite(DIODE_BLUE_PIN, HIGH);
-      delay(500);
-      digitalWrite(DIODE_BLUE_PIN, LOW);
-      delay(500);
-    } else {
-      //moving
-      int distance = head_measure_distance(HEAD_FW);
-      if (distance > obstacleDist) {
-        carState.obstacleDetected = false;
-        car_forward(MIN_SPEED);
-      } else {
-        carState.obstacleDetected = true;
-        car_stop();
-
-      }
-    }
-    digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);
-  } else {
-    //stop and reset state
-    carState.obstacleDetected = false;
-    carState.obstacleSolutionAttempts = 0;
-    car_stop();
-  }
-
-  digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);
-  delay(100);
+  // digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);
+  // delay(100);
   
 }
