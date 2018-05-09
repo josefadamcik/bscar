@@ -18,16 +18,22 @@ struct MotorConfig {
 
 const int obstacleDist = 50;
 
-RH_NRF24 radioDriver;
-RHReliableDatagram radio(radioDriver, CAR_ADDRESS);
+// RH_NRF24 nrf24;
+// RHReliableDatagram radio(nrf24, CAR_ADDRESS);
 CarState carState;
 
-MotorConfig leftMotor = MotorConfig(3, 4, 2);
-MotorConfig rightMotor = MotorConfig(5, 7, 6);
+// MotorConfig leftMotor = MotorConfig(3, 4, 2);
+// MotorConfig rightMotor = MotorConfig(5, 7, 6);
+
+MotorConfig leftMotor = MotorConfig(5, 4, 7);
+MotorConfig rightMotor = MotorConfig(6, 2, 3);
+
 
 Servo headservo;  // create servo object to control a servo
 int pos = 0;    // variable to store the servo position
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
+uint8_t radioBuffer[RH_NRF24_MAX_MESSAGE_LEN];
+uint8_t *radioResponse;
 
 
 void motor_init(MotorConfig &motor) {
@@ -60,22 +66,26 @@ void setup() {
   pinMode(ONOFF_PIN, INPUT_PULLUP);
   pinMode(DIODE_RED_PIN, OUTPUT);
   pinMode(DIODE_BLUE_PIN, OUTPUT);
-  if (!radio.init()) {
-    Serial.println("init failed");
-  }
-  // if (!radioDriver.init()) {
+  // if (!radio.init()) {
   //   Serial.println("init failed");
   // }
-  // // Defaults after init are 2.402 GHz (channel 2), 2Mbps, 0dBm
-  // if (!radioDriver.setChannel(1)) {
-  //   Serial.println("setChannel failed");
-  // }
-  // if (!radioDriver.setRF(RH_NRF24::DataRate2Mbps, RH_NRF24::TransmitPower0dBm)) {
-  //   Serial.println("setRF failed");    
-  // }
+
+  // radio.setTimeout(500);
+  // radio.setRetries(5);
+
+
+  // Defaults after init are 2.402 GHz (channel 2), 2Mbps, 0dBm
+  if (!nrf24.setChannel(2)) {
+     Serial.println("setChannel failed");
+  }
+    
+  if (!nrf24.setRF(RH_NRF24::DataRate1Mbps, RH_NRF24::TransmitPowerm18dBm)) {
+     Serial.println("setRF failed");   
+  }
+  
 
   Serial.print("max rf message lenght: ");
-  Serial.println(radioDriver.maxMessageLength());
+  Serial.println(nrf24.maxMessageLength());
 }
 
 void radio_send_state(CarState &carState) {
@@ -118,7 +128,7 @@ void car_forward(int speed) {
   carState.rightMotor = motor_go(rightMotor, DIR_FW, speed);
 }
 
-void cara_backward(int speed) {
+void car_backward(int speed) {
   carState.leftMotor = motor_go(leftMotor, DIR_BW, speed);
   carState.rightMotor = motor_go(rightMotor, DIR_BW, speed);
 }
@@ -152,7 +162,7 @@ void obstacle_handle() {
 
   if (max(leftDistance, rightDistance) <= obstacleDist || carState.obstacleSolutionAttempts == MAX_OBSTACLE_DET_ATTEMTPS - 1) {
     //solve by going back a bit
-    cara_backward(MIN_SPEED);
+    car_backward(MIN_SPEED);
     delay(1000);
     car_stop();
   } else if (rightDistance > obstacleDist) {
@@ -171,10 +181,105 @@ void obstacle_handle() {
   //stay in detected obstacle mode, will try to handle it again.
 }
 
+void process_go(uint8_t direction, uint8_t speed) {
+  if (direction == DIR_FW) {
+    car_forward(speed);
+  } else if (direction == DIR_BW) {
+    car_backward(speed);
+  } else {
+    car_stop();
+  }
+}
+
+
 
 void loop()
 {
-  
+
+//   if (radio.available())
+//   {
+    
+//  // Wait for a message addressed to us from the client
+//     uint8_t len;
+//     uint8_t from;
+//     uint8_t responseLen;
+//     CommandResponse response;
+//     response.state = 128;
+//     if (radio.recvfromAck(radioBuffer, &len, &from))
+//  //Serial Print the values of joystick
+//     {
+//       uint8_t command = radioBuffer[0];
+//       Serial.print("from: ");
+//       Serial.print(from);
+//       Serial.print(" len ");
+//       Serial.println(len);
+//       Serial.print(radioBuffer[0]);
+//       Serial.print(radioBuffer[1]);
+//       Serial.print(radioBuffer[2]);
+//       switch (command){
+//         case COMMAND_GO:
+//           Serial.println("received go");
+//           process_go(radioBuffer[1], radioBuffer[2]);
+//           radioResponse = (uint8_t *)&carState;
+//           responseLen = sizeof(struct CarState);
+//           response.state = COMMAND_GO;
+//           break;
+//         case COMMAND_STOP:
+//           Serial.println("received stop");
+//           car_stop();
+//           response.state = COMMAND_STOP;
+//           radioResponse = (uint8_t *)&carState;
+//           responseLen = sizeof(struct CarState);
+//           break;
+//         case COMMAND_TURN:
+//           //todo
+//           radioResponse = (uint8_t *)&carState;
+//           responseLen = sizeof(struct CarState);
+//           break;
+//         case COMMAND_PARAMS:
+//           //todo
+//           break;       
+//         case COMMAND_GET:
+//           switch(radioBuffer[1]) {
+//               case GET_STATE_CAR:
+//                 radioResponse = (uint8_t *)&carState;
+//                 responseLen = sizeof(struct CarState);
+//                 break;
+//               case GET_STATE_PARAMS:
+//               //todo
+//                 break;    
+//               case GET_STATE_DISTANCE:
+//               //todo
+//                 break;
+//           }
+//           break;       
+//         default:
+//           response.state = 127;
+//           Serial.println(" uknown command");
+//       }
+//       if (response.state <= 127) {
+//         digitalWrite(DIODE_BLUE_PIN, HIGH);
+//       } else {
+//         digitalWrite(DIODE_BLUE_PIN, LOW);
+//       }
+
+      
+
+//       Serial.println(sizeof(struct CommandResponse));
+
+//       if (!radio.sendtoWait((uint8_t *)&response, sizeof(struct CommandResponse), REMOTE_ADDRESS)) {
+//         Serial.println(" sendtoWait failed " + from);
+//         digitalWrite(DIODE_RED_PIN, HIGH);
+//         nrf24.printRegisters();
+//       } else {
+//         digitalWrite(DIODE_RED_PIN, LOW);
+//       }
+//     }
+
+//     delay(500);
+//     digitalWrite(DIODE_RED_PIN, LOW);
+//     digitalWrite(DIODE_BLUE_PIN, LOW);
+//   }
 
   carState.autonomousMode = !digitalRead(ONOFF_PIN);
   digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
@@ -215,10 +320,9 @@ void loop()
     carState.obstacleDetected = false;
     carState.obstacleSolutionAttempts = 0;
     car_stop();
-    Serial.println("idle");
   }
 
   digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);
-  radio_send_state(carState);
   delay(100);
+  
 }

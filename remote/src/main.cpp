@@ -65,15 +65,18 @@ void setup() {
   if (!radio.init()) {
     Serial.println("init failed");
   }
-  
-  // // Defaults after init are 2.402 GHz (channel 2), 2Mbps, 0dBm
-  // if (!nrf24.setChannel(1)) {
-  //   Serial.println("setChannel failed");
-  // }
+
+  radio.setTimeout(500);
+  radio.setRetries(5);
+
+  // Defaults after init are 2.402 GHz (channel 2), 2Mbps, 0dBm
+  if (!nrf24.setChannel(2)) {
+     Serial.println("setChannel failed");
+  }
     
-  // if (!nrf24.setRF(RH_NRF24::DataRate2Mbps, RH_NRF24::TransmitPower0dBm)) {
-  //   Serial.println("setRF failed");   
-  // }
+  if (!nrf24.setRF(RH_NRF24::DataRate1Mbps, RH_NRF24::TransmitPowerm18dBm )) {
+     Serial.println("setRF failed");   
+  }
     
 
   pinMode(JOY_BTN_PIN, INPUT_PULLUP);
@@ -85,10 +88,12 @@ void loop() {
   // Read the Joystick X and Y positions
   joyposVert = analogRead(JOY_VERT_PIN); 
   joyposHorz = analogRead(JOY_HORIZ_PIN);
+  boolean trigger = false;
 
   if (button_check_debounced(joysticButton)) {
     if (joysticButton.buttonState == HIGH) {
       remoteControlMode = !remoteControlMode;
+      trigger = true;
     }
   }
   
@@ -102,31 +107,85 @@ void loop() {
   // Serial.print("\t");
   // Serial.println(joyposHorz);
 
-  if (radio.available()) {
-    CarState data;
-    uint8_t len;
-    uint8_t from;
-    uint8_t to;
-    if (radio.recvfrom((uint8_t *)&data, &len, &from, &to, NULL, NULL)) {
-        // Do something with data.name and data.skill
-        Serial.print("recived: ");
-        Serial.print(len);
-        Serial.print(' ');
-        Serial.print(from);
-        Serial.println();
-        Serial.print("Left motor ");
-        Serial.print(data.leftMotor.direction);
-        Serial.print(' ');
-        Serial.print(data.leftMotor.speed);
-        Serial.println();
-        Serial.print("Right motor ");
-        Serial.print(data.rightMotor.direction);
-        Serial.print(' ');
-        Serial.print(data.rightMotor.speed);
-        Serial.println();
-        Serial.print("autonomous?: ");
-        Serial.print(data.autonomousMode);
-        Serial.println();
+  if (trigger) {
+    Serial.println("triggered, send command");
+    uint8_t command[3];
+    if (remoteControlMode) {
+      command[0] = COMMAND_GO;
+      command[1] = DIR_FW;
+      command[2] = 160;
+    } else {
+      command[0] = COMMAND_STOP;
+      command[1] = command[2] = 0;
     }
+    Serial.print(command[0]);
+    Serial.print(command[1]);
+    Serial.println(command[2]);
+   //Send a message containing Joystick data to manager_server
+    if (radio.sendtoWait(command, sizeof(command), CAR_ADDRESS))
+    {
+      CommandResponse data;
+      // Now wait for a reply from the server
+      uint8_t len;
+      uint8_t from;
+      if (radio.recvfromAckTimeout((uint8_t *)&data, &len, 3000, &from))
+      {
+          Serial.print("recived: ");
+          Serial.print(len);
+          Serial.print(" b, from: ");
+          Serial.print(from);
+          Serial.println();
+          Serial.println(data.state);
+          // Serial.print("Left motor ");
+          // Serial.print(data.leftMotor.direction);
+          // Serial.print(' ');
+          // Serial.print(data.leftMotor.speed);
+          // Serial.println();
+          // Serial.print("Right motor ");
+          // Serial.print(data.rightMotor.direction);
+          // Serial.print(' ');
+          // Serial.print(data.rightMotor.speed);
+          // Serial.println();
+          // Serial.print("autonomous?: ");
+          // Serial.print(data.autonomousMode);
+          Serial.println();
+      }
+      else
+      {
+        Serial.println("No reply, is nrf24_reliable_datagram_server running?");
+      }
+    }
+    else {
+      Serial.println("sendtoWait failed");
+    }
+
   }
+
+  // if (radio.available()) {
+  //   CarState data;
+  //   uint8_t len;
+  //   uint8_t from;
+  //   uint8_t to;
+  //   if (radio.recvfrom((uint8_t *)&data, &len, &from, &to, NULL, NULL)) {
+  //       // Do something with data.name and data.skill
+  //       Serial.print("recived: ");
+  //       Serial.print(len);
+  //       Serial.print(' ');
+  //       Serial.print(from);
+  //       Serial.println();
+  //       Serial.print("Left motor ");
+  //       Serial.print(data.leftMotor.direction);
+  //       Serial.print(' ');
+  //       Serial.print(data.leftMotor.speed);
+  //       Serial.println();
+  //       Serial.print("Right motor ");
+  //       Serial.print(data.rightMotor.direction);
+  //       Serial.print(' ');
+  //       Serial.print(data.rightMotor.speed);
+  //       Serial.println();
+  //       Serial.print("autonomous?: ");
+  //       Serial.print(data.autonomousMode);
+  //       Serial.println();
+  //   }
+  // }
 }

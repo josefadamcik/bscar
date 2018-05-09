@@ -1,19 +1,44 @@
 #define REMOTE_ADDRESS 1
 #define CAR_ADDRESS 2
-
-#define DIR_FW 1 
-#define DIR_NONE 0
-#define DIR_BW -1 
-
 #define DIST_ANGLE_COUNT 9
+
+
+
+/*
+* Communication protocol.
+* In a nutshell: remote sends commands and gets different responses back. Response is a struct containing data.
+*/
+
+/** Send command for movement, paramms: direction(byte), speed(byte), expects CarState as response */
+const uint8_t COMMAND_GO = 1;
+/** Send command to stop, expects CarState as response */
+const uint8_t COMMAND_STOP = 2;
+/** Send command for turning, paramms: direction(byte), howmuch(byte), expects CarState as response */
+const uint8_t COMMAND_TURN = 3;
+/** Set params for car, params: TBD, expects ParamsState as response */
+const uint8_t COMMAND_PARAMS = 4;
+/** Requests specific state response, parameter: what(byte), see GET_STATE_xxx. Expects chosen data as response */
+const uint8_t COMMAND_GET = 5;
+
+const uint8_t GET_STATE_CAR = 1;
+const uint8_t GET_STATE_PARAMS = 2;
+const uint8_t GET_STATE_DISTANCE = 3;
+
+const uint8_t DIR_FW = 1; 
+const uint8_t DIR_NONE = 0;
+const uint8_t DIR_BW = -1;
+
+const uint8_t TURN_LEFT = 1;
+const uint8_t TURN_RIGTH = -1;
+
 
 const byte DistanceAngles[] = {5, 10, 15, 80, 90 , 100, 165, 170, 175};
 
 struct MotorState {
-  byte speed;
-  byte direction;
+  uint8_t speed;
+  uint8_t direction;
   MotorState() : speed(0), direction(DIR_NONE) {};
-  MotorState(byte speed, byte direction) : speed(speed), direction(direction) {};
+  MotorState(uint8_t speed, uint8_t direction) : speed(speed), direction(direction) {};
 };
 
 
@@ -30,6 +55,7 @@ struct CarControlData {
   MotorState rightMotor;
 };
 
+
 struct CarState {
   boolean autonomousMode = false;
   boolean obstacleDetected = false;
@@ -38,3 +64,7 @@ struct CarState {
   MotorState rightMotor;
 };
 
+
+struct CommandResponse {
+  uint8_t state;
+};

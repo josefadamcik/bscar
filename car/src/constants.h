@@ -7,8 +7,6 @@
 #define DIODE_RED_PIN A1
 #define DIODE_BLUE_PIN A2
 
-#define TURN_LEFT -1
-#define TURN_RIGTH 1
 #define HEAD_MIN 0
 #define HEAD_MAX 180
 #define HEAD_LEFT 165
