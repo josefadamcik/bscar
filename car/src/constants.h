@@ -6,7 +6,8 @@
 #define ONOFF_PIN A0
 #define DIODE_RED_PIN A1
 #define DIODE_BLUE_PIN A2
-#define OPTO_INTERUPT_PIN 2
+#define OPTO_INTERUPT_RIGHT_PIN 2
+#define OPTO_INTERUPT_LEFT_PIN 3
 
 #define HEAD_MIN 0
 #define HEAD_MAX 180

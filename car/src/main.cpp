@@ -48,14 +48,27 @@ MotorState motor_stop(MotorConfig &motor) {
   return MotorState();
 }
 
-volatile unsigned int left_step_count;
+volatile unsigned int left_step_count = 0;
+volatile unsigned int right_step_count = 0;
+volatile byte left_last_state = LOW;
+volatile byte right_last_state = LOW;
 const float stepcount = 20.00;  // 20 Slots in disk, change if different
 const float wheeldiameter = 66.10; // Wheel diameter in millimeters, change if different
 const float wheelcircumference = wheeldiameter * 3.1416;
  
 
 void opto_interrupt() {
-  left_step_count++;
+  byte right_state = digitalRead(OPTO_INTERUPT_RIGHT_PIN);
+  byte left_state = digitalRead(OPTO_INTERUPT_LEFT_PIN);
+  if (right_state == HIGH && right_last_state == LOW) {
+    right_step_count++;
+  }
+  if (left_state == HIGH && left_last_state == LOW) {
+    left_step_count++;
+  }
+  
+  left_last_state = left_state;
+  right_last_state = right_state;
 }
 
 
@@ -64,8 +77,10 @@ void setup() {
   motor_init(leftMotor);
   motor_init(rightMotor);
   headservo.attach(HEADSERVO_PIN);  // attaches the servo on pin 9 to the servo object
-  pinMode(OPTO_INTERUPT_PIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(OPTO_INTERUPT_PIN), opto_interrupt, RISING);
+  pinMode(OPTO_INTERUPT_RIGHT_PIN, INPUT);
+  pinMode(OPTO_INTERUPT_LEFT_PIN, INPUT);
+  attachInterrupt(digitalPinToInterrupt(OPTO_INTERUPT_RIGHT_PIN), opto_interrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(OPTO_INTERUPT_LEFT_PIN), opto_interrupt, CHANGE);
   Serial.begin(9600); 
   pinMode(ONOFF_PIN, INPUT_PULLUP);
   pinMode(DIODE_RED_PIN, OUTPUT);
@@ -169,91 +184,6 @@ void process_go(uint8_t direction, uint8_t speed) {
 void loop()
 {
 
-//   if (radio.available())
-//   {
-    
-//  // Wait for a message addressed to us from the client
-//     uint8_t len;
-//     uint8_t from;
-//     uint8_t responseLen;
-//     CommandResponse response;
-//     response.state = 128;
-//     if (radio.recvfromAck(radioBuffer, &len, &from))
-//  //Serial Print the values of joystick
-//     {
-//       uint8_t command = radioBuffer[0];
-//       Serial.print("from: ");
-//       Serial.print(from);
-//       Serial.print(" len ");
-//       Serial.println(len);
-//       Serial.print(radioBuffer[0]);
-//       Serial.print(radioBuffer[1]);
-//       Serial.print(radioBuffer[2]);
-//       switch (command){
-//         case COMMAND_GO:
-//           Serial.println("received go");
-//           process_go(radioBuffer[1], radioBuffer[2]);
-//           radioResponse = (uint8_t *)&carState;
-//           responseLen = sizeof(struct CarState);
-//           response.state = COMMAND_GO;
-//           break;
-//         case COMMAND_STOP:
-//           Serial.println("received stop");
-//           car_stop();
-//           response.state = COMMAND_STOP;
-//           radioResponse = (uint8_t *)&carState;
-//           responseLen = sizeof(struct CarState);
-//           break;
-//         case COMMAND_TURN:
-//           //todo
-//           radioResponse = (uint8_t *)&carState;
-//           responseLen = sizeof(struct CarState);
-//           break;
-//         case COMMAND_PARAMS:
-//           //todo
-//           break;       
-//         case COMMAND_GET:
-//           switch(radioBuffer[1]) {
-//               case GET_STATE_CAR:
-//                 radioResponse = (uint8_t *)&carState;
-//                 responseLen = sizeof(struct CarState);
-//                 break;
-//               case GET_STATE_PARAMS:
-//               //todo
-//                 break;    
-//               case GET_STATE_DISTANCE:
-//               //todo
-//                 break;
-//           }
-//           break;       
-//         default:
-//           response.state = 127;
-//           Serial.println(" uknown command");
-//       }
-//       if (response.state <= 127) {
-//         digitalWrite(DIODE_BLUE_PIN, HIGH);
-//       } else {
-//         digitalWrite(DIODE_BLUE_PIN, LOW);
-//       }
-
-      
-
-//       Serial.println(sizeof(struct CommandResponse));
-
-//       if (!radio.sendtoWait((uint8_t *)&response, sizeof(struct CommandResponse), REMOTE_ADDRESS)) {
-//         Serial.println(" sendtoWait failed " + from);
-//         digitalWrite(DIODE_RED_PIN, HIGH);
-//         nrf24.printRegisters();
-//       } else {
-//         digitalWrite(DIODE_RED_PIN, LOW);
-//       }
-//     }
-
-//     delay(500);
-//     digitalWrite(DIODE_RED_PIN, LOW);
-//     digitalWrite(DIODE_BLUE_PIN, LOW);
-//   }
-
   // carState.autonomousMode = !digitalRead(ONOFF_PIN);
   // digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
   // if (carState.autonomousMode)  {
@@ -288,31 +218,46 @@ void loop()
     carState.autonomousMode = !digitalRead(ONOFF_PIN);
     digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
     if (carState.autonomousMode) {
-      for (int i = 100; i <=250; i += 10) {
+      
+      for (int i=100; i < 250; i += 10) {
+        unsigned long start = millis();
+        unsigned int left_last_steps = left_step_count;
+        unsigned int right_last_steps = right_step_count;
         car_forward(i);
-        unsigned int last_steps = left_step_count;
+        while (left_step_count - left_last_steps < stepcount * 5) {
+          delay(1);
+        }
+        car_stop();
         delay(500);
-        unsigned int curr_steps = left_step_count;
-        unsigned int diff = curr_steps - last_steps;
-        float rounds = diff / stepcount;
-        float rpm = rounds * 2 * 60; //per minute
-        float cmpm = rpm * wheelcircumference * 10; //mm -> cm
         Serial.print(i);
         Serial.print('\t');
-        Serial.print(diff);
+        Serial.print(millis() - start);
         Serial.print('\t');
-        Serial.print(rounds);
-        Serial.print('\t');
-        Serial.println(cmpm);
+        Serial.print(left_step_count - left_last_steps);
+        Serial.print(" / ");
+        Serial.println(right_step_count - right_last_steps);
+        delay(2000);
       }
+      // for (int i = 100; i <=250; i += 10) {
+      //   car_forward(i);
+      //   unsigned int last_steps = left_step_count;
+      //   delay(500);
+      //   unsigned int curr_steps = left_step_count;
+      //   unsigned int diff = curr_steps - last_steps;
+      //   float rounds = diff / stepcount;
+      //   float rpm = rounds * 2 * 60; //per minute
+      //   float cmpm = rpm * wheelcircumference * 10; //mm -> cm
+      //   Serial.print(i);
+      //   Serial.print('\t');
+      //   Serial.print(diff);
+      //   Serial.print('\t');
+      //   Serial.print(rounds);
+      //   Serial.print('\t');
+      //   Serial.println(cmpm);
+      // }
       
     }
-    // car_stop();
-    // car_turn(TURN_LEFT, 700);
-    // 
-    // delay(1000);
-    // car_stop();
-    // car_turn(TURN_RIGTH, 700);
+
 
   // digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);
   // delay(100);
