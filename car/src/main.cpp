@@ -2,17 +2,9 @@
 #include <Servo.h>
 #include <NewPing.h>
 #include <constants.h>
+#include <motor.h>
 #include <SPI.h>
-#include <../../shared/shared_structs.h>
-
-
-struct MotorConfig {
-  int pwmPin;
-  int forwardPin;
-  int backwardPin;
-  MotorConfig(int pwm, int fw, int bw) : pwmPin(pwm), forwardPin(fw), backwardPin(bw) {}
-};
-
+#include <SoftwareSerial.h>
 
 const int obstacleDist = 50;
 
@@ -22,31 +14,11 @@ CarState carState;
 MotorConfig leftMotor = MotorConfig(5, 7, 4);
 MotorConfig rightMotor = MotorConfig(6, 8, 10);
 
+SoftwareSerial bluetooth(BLUETOOTH_RX_PIN, BLUETOOTH_TX_PIN); 
 
 Servo headservo;  // create servo object to control a servo
 int pos = 0;    // variable to store the servo position
 NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
-
-
-void motor_init(MotorConfig &motor) {
-  pinMode(motor.pwmPin, OUTPUT);
-  pinMode(motor.forwardPin, OUTPUT);
-  pinMode(motor.backwardPin, OUTPUT);
-}
-
-MotorState motor_go(MotorConfig &motor, int dir, int speed) {
-  digitalWrite(motor.forwardPin, dir == DIR_FW ? HIGH : LOW);
-  digitalWrite(motor.backwardPin, dir == DIR_FW ? LOW : HIGH);
-  analogWrite(motor.pwmPin, speed);
-  return MotorState(speed, speed == 0 ? DIR_NONE : dir);
-}
-
-MotorState motor_stop(MotorConfig &motor) {
-  digitalWrite(motor.forwardPin, LOW);
-  digitalWrite(motor.backwardPin, LOW);
-  analogWrite(motor.pwmPin, 0);
-  return MotorState();
-}
 
 volatile unsigned int left_step_count = 0;
 volatile unsigned int right_step_count = 0;
@@ -55,6 +27,9 @@ volatile byte right_last_state = LOW;
 const float stepcount = 20.00;  // 20 Slots in disk, change if different
 const float wheeldiameter = 66.10; // Wheel diameter in millimeters, change if different
 const float wheelcircumference = wheeldiameter * 3.1416;
+const int mainMovementSpeedIncrement = 10;
+const int mainMovementSpeedMin = 100;
+const int mainMovementSpeedMax = 255;
  
 
 void opto_interrupt() {
@@ -82,9 +57,11 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(OPTO_INTERUPT_RIGHT_PIN), opto_interrupt, CHANGE);
   attachInterrupt(digitalPinToInterrupt(OPTO_INTERUPT_LEFT_PIN), opto_interrupt, CHANGE);
   Serial.begin(9600); 
+  bluetooth.begin(9600);
   pinMode(ONOFF_PIN, INPUT_PULLUP);
   pinMode(DIODE_RED_PIN, OUTPUT);
   pinMode(DIODE_BLUE_PIN, OUTPUT);
+  bluetooth.write("setup done");
 }
 
 
@@ -111,6 +88,21 @@ int head_measure_distance(int direction) {
   return result;
 }
 
+
+static inline int8_t sgn(int val) {
+  if (val < 0) return -1;
+  if (val==0) return 0;
+  return 1;
+}
+
+/**
+ * @param speedWithSign - positive values are forward, negative backward
+ */ 
+void car_move(int speedWithSign) {
+  carState.leftMotor = motor_go(leftMotor, sgn(speedWithSign), abs(speedWithSign));
+  carState.rightMotor = motor_go(rightMotor, sgn(speedWithSign), abs(speedWithSign));  
+}
+
 void car_forward(int speed) {
   carState.leftMotor = motor_go(leftMotor, DIR_FW, speed);
   carState.rightMotor = motor_go(rightMotor, DIR_FW, speed);
@@ -126,7 +118,8 @@ void car_stop() {
   carState.rightMotor = motor_stop(rightMotor);
 }
 
-void car_turn(int direction, int amount) {
+
+void car_start_turning(int direction) {
   if (direction == TURN_LEFT) {
     carState.leftMotor = motor_go(leftMotor, DIR_BW, TURN_SPEED);
     carState.rightMotor = motor_go(rightMotor, DIR_FW, TURN_SPEED);
@@ -134,6 +127,10 @@ void car_turn(int direction, int amount) {
     carState.leftMotor = motor_go(leftMotor, DIR_FW, TURN_SPEED);
     carState.rightMotor = motor_go(rightMotor, DIR_BW, TURN_SPEED);
   }
+}
+
+void car_turn(int direction, int amount) {
+  car_start_turning(direction);
   delay(amount);
   carState.leftMotor = motor_stop(leftMotor);
   carState.rightMotor = motor_stop(rightMotor);
@@ -167,16 +164,6 @@ void obstacle_handle() {
     Serial.println("OBstacle handled");
   } 
   //stay in detected obstacle mode, will try to handle it again.
-}
-
-void process_go(uint8_t direction, uint8_t speed) {
-  if (direction == DIR_FW) {
-    car_forward(speed);
-  } else if (direction == DIR_BW) {
-    car_backward(speed);
-  } else {
-    car_stop();
-  }
 }
 
 
@@ -216,29 +203,81 @@ void loop()
   //   car_stop();
   // }
     carState.autonomousMode = !digitalRead(ONOFF_PIN);
-    digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
-    if (carState.autonomousMode) {
-      
-      for (int i=100; i < 250; i += 10) {
-        unsigned long start = millis();
-        unsigned int left_last_steps = left_step_count;
-        unsigned int right_last_steps = right_step_count;
-        car_forward(i);
-        while (left_step_count - left_last_steps < stepcount * 5) {
-          delay(1);
+    char command;
+    if (bluetooth.available()) {
+        command=(bluetooth.read());
+        bluetooth.println(command);
+        int speed;
+        switch (command) {
+          case 'f':
+            speed = carState.mainMovementSpeed;
+            if (speed == 0) {
+              speed = mainMovementSpeedMin;
+            } else if (speed > 0 && speed < mainMovementSpeedMax) {
+              speed = constrain(speed + mainMovementSpeedIncrement, mainMovementSpeedMin, mainMovementSpeedMax);
+            } else if (speed < 0 && speed < -mainMovementSpeedMin) {
+              speed = constrain(speed + mainMovementSpeedIncrement, -mainMovementSpeedMax, -mainMovementSpeedMin);
+            } else if (speed < 0) { //slowest backward spped
+              speed = 0;
+            }
+            car_move(speed);
+            bluetooth.println(speed);
+            carState.mainMovementSpeed = speed;
+            break;
+          case 'b':
+            speed = carState.mainMovementSpeed;
+            if (speed == 0) {
+              speed = -mainMovementSpeedMin;
+            } else if (speed < 0 && speed > -mainMovementSpeedMax) {
+              speed = constrain(speed - mainMovementSpeedIncrement, -mainMovementSpeedMax, -mainMovementSpeedMin);
+            } else if (speed > 0 && speed > mainMovementSpeedMin) {
+              speed = constrain(speed - mainMovementSpeedIncrement, mainMovementSpeedMin, mainMovementSpeedMax);
+            } else if (speed > 0) { //slowest backward spped
+              speed = 0;
+            }
+            car_move(speed);
+            bluetooth.println(speed);
+            carState.mainMovementSpeed = speed;
+            break;
+          case 'l':
+            carState.mainMovementSpeed = 0;
+            car_start_turning(TURN_LEFT);
+            break;
+          case 'r':
+            carState.mainMovementSpeed = 0;
+            car_start_turning(TURN_RIGTH);
+            break;
+          case 'x':
+            carState.mainMovementSpeed = 0;
+            car_stop();
+            break;
         }
-        car_stop();
-        delay(500);
-        Serial.print(i);
-        Serial.print('\t');
-        Serial.print(millis() - start);
-        Serial.print('\t');
-        Serial.print(left_step_count - left_last_steps);
-        Serial.print(" / ");
-        Serial.println(right_step_count - right_last_steps);
-        delay(2000);
+        
+        bluetooth.println("cmd executed");
       }
-      // for (int i = 100; i <=250; i += 10) {
+    // digitalWrite(DIODE_RED_PIN, carState.autonomousMode);
+    // if (carState.autonomousMode) {
+      
+    //   for (int i=100; i < 250; i += 10) {
+    //     unsigned long start = millis();
+    //     unsigned int left_last_steps = left_step_count;
+    //     unsigned int right_last_steps = right_step_count;
+    //     car_forward(i);
+    //     while (left_step_count - left_last_steps < stepcount * 5) {
+    //       delay(1);
+    //     }
+    //     car_stop();
+    //     delay(500);
+    //     Serial.print(i);
+    //     Serial.print('\t');
+    //     Serial.print(millis() - start);
+    //     Serial.print('\t');
+    //     Serial.print(left_step_count - left_last_steps);
+    //     Serial.print(" / ");
+    //     Serial.println(right_step_count - right_last_steps);
+    //     delay(2000);
+    //   }
+    //   // for (int i = 100; i <=250; i += 10) {
       //   car_forward(i);
       //   unsigned int last_steps = left_step_count;
       //   delay(500);
@@ -256,7 +295,7 @@ void loop()
       //   Serial.println(cmpm);
       // }
       
-    }
+    // }
 
 
   // digitalWrite(DIODE_BLUE_PIN, carState.obstacleDetected);

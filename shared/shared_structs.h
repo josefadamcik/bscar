@@ -1,8 +1,4 @@
-#define REMOTE_ADDRESS 1
-#define CAR_ADDRESS 2
 #define DIST_ANGLE_COUNT 9
-
-
 
 /*
 * Communication protocol.
@@ -62,6 +58,7 @@ struct CarState {
   int obstacleSolutionAttempts = 0;
   MotorState leftMotor;
   MotorState rightMotor;
+  int mainMovementSpeed = 0;
 };
 
 
