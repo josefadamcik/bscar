@@ -6,48 +6,80 @@
 #include <SPI.h>
 #include <SoftwareSerial.h>
 
-const int obstacleDist = 50;
+struct StepCounterState {
+  const float stepcount = 20.0;
+  const float wheeldiameter = 66.0; //m
+  const float wheelcircumference = wheeldiameter * 3.1416;
+  const unsigned long speedSampleInterval = 1000; //1 sec
+  const float speedSamplePerMinitMulti = 60 * 1000 / speedSampleInterval;
 
-CarState carState;
+  volatile unsigned long leftCount = 0;
+  volatile unsigned long rightCount = 0;
+  volatile byte leftLastState = LOW;
+  volatile byte rightLastState = LOW;
+  volatile unsigned long lastSpeedSampleMillis = 0;
+  volatile unsigned long lastSpeedSampleCount = 0;
+  volatile float lastSpeedValue = .0; //rpi, rounds per interval
+};
 
-//with 5 and 6 for pwm the both sides behaves the same, with 3&5 it seemed that one side (pin 3) had lower voltage
-MotorConfig leftMotor = MotorConfig(5, 7, 4);
-MotorConfig rightMotor = MotorConfig(6, 8, 10);
-
-SoftwareSerial bluetooth(BLUETOOTH_RX_PIN, BLUETOOTH_TX_PIN); 
-
-Servo headservo;  // create servo object to control a servo
-int pos = 0;    // variable to store the servo position
-NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
-
-volatile unsigned int left_step_count = 0;
-volatile unsigned int right_step_count = 0;
-volatile byte left_last_state = LOW;
-volatile byte right_last_state = LOW;
-const float stepcount = 20.00;  // 20 Slots in disk, change if different
-const float wheeldiameter = 66.10; // Wheel diameter in millimeters, change if different
-const float wheelcircumference = wheeldiameter * 3.1416;
 const int mainMovementSpeedIncrement = 10;
 const int mainMovementSpeedMin = 100;
 const int mainMovementSpeedMax = 255;
- 
+const int obstacleDist = 50;
+
+CarState carState;
+StepCounterState stepCounterState;
+//with 5 and 6 for pwm the both sides behaves the same, with 3&5 it seemed that one side (pin 3) had lower voltage
+MotorConfig leftMotor = MotorConfig(5, 7, 4);
+MotorConfig rightMotor = MotorConfig(6, 8, 10);
+SoftwareSerial bluetooth(BLUETOOTH_RX_PIN, BLUETOOTH_TX_PIN); 
+Servo headservo;  // create servo object to control a servo
+NewPing sonar(TRIGGER_PIN, ECHO_PIN, MAX_DISTANCE);
 
 void opto_interrupt() {
-  byte right_state = digitalRead(OPTO_INTERUPT_RIGHT_PIN);
-  byte left_state = digitalRead(OPTO_INTERUPT_LEFT_PIN);
-  if (right_state == HIGH && right_last_state == LOW) {
-    right_step_count++;
+  byte rightState = digitalRead(OPTO_INTERUPT_RIGHT_PIN);
+  byte leftState = digitalRead(OPTO_INTERUPT_LEFT_PIN);
+  if (rightState == HIGH && stepCounterState.rightLastState == LOW) {
+    stepCounterState.rightCount++;
   }
-  if (left_state == HIGH && left_last_state == LOW) {
-    left_step_count++;
+  if (leftState == HIGH && stepCounterState.leftLastState == LOW) {
+    stepCounterState.leftCount++;
   }
   
-  left_last_state = left_state;
-  right_last_state = right_state;
+  stepCounterState.leftLastState = leftState;
+  stepCounterState.rightLastState = rightState;
+}
+
+/**
+ * Called by timer each interval
+ */ 
+void opto_compute_speed() {
+  if (carState.leftMotor.direction == carState.rightMotor.direction) { 
+    //compute only when both motors are going into the same direction. It doesn't make sense, when they are turning.
+    stepCounterState.lastSpeedSampleMillis = millis();
+    unsigned long stepsavg = (stepCounterState.leftCount + stepCounterState.rightCount) / 2;
+    unsigned long diff = stepsavg - stepCounterState.lastSpeedSampleCount;
+    stepCounterState.lastSpeedSampleCount = stepsavg;
+    stepCounterState.lastSpeedValue = diff / stepCounterState.stepcount;
+    float rpm = stepCounterState.lastSpeedValue * stepCounterState.speedSamplePerMinitMulti; //per minute
+    float cmpm = rpm * stepCounterState.wheelcircumference / 10; //mm -> cm
+    bluetooth.print(stepCounterState.leftCount);
+    bluetooth.print("/");
+    bluetooth.print(stepCounterState.rightCount);
+    bluetooth.print(" sp ");
+    bluetooth.print(stepCounterState.lastSpeedValue);
+    bluetooth.print(" ");
+    bluetooth.println(cmpm);
+  }
 }
 
 
-
+void opto_reset() {
+  stepCounterState.leftCount = 0;
+  stepCounterState.rightCount = 0;
+  stepCounterState.lastSpeedValue = 0.0;
+  stepCounterState.lastSpeedSampleCount = 0;
+}
 
 static inline int8_t sgn(int val) {
   if (val < 0) return -1;
@@ -64,16 +96,25 @@ static inline int8_t sgn(int val) {
  * @param speedWithSign - positive values are forward, negative backward
  */ 
 void car_move(int speedWithSign) {
+  if (carState.leftMotor.direction != carState.rightMotor.direction) {
+    opto_reset();
+  }
   carState.leftMotor = motor_go(leftMotor, sgn(speedWithSign), abs(speedWithSign));
   carState.rightMotor = motor_go(rightMotor, sgn(speedWithSign), abs(speedWithSign));  
 }
 
 void car_forward(int speed) {
+  if (carState.leftMotor.direction != carState.rightMotor.direction) {
+    opto_reset();
+  }
   carState.leftMotor = motor_go(leftMotor, DIR_FW, speed);
   carState.rightMotor = motor_go(rightMotor, DIR_FW, speed);
 }
 
 void car_backward(int speed) {
+  if (carState.leftMotor.direction != carState.rightMotor.direction) {
+    opto_reset();
+  }
   carState.leftMotor = motor_go(leftMotor, DIR_BW, speed);
   carState.rightMotor = motor_go(rightMotor, DIR_BW, speed);
 }
@@ -81,6 +122,7 @@ void car_backward(int speed) {
 void car_stop() {
   carState.leftMotor = motor_stop(leftMotor);
   carState.rightMotor = motor_stop(rightMotor);
+  opto_reset();
 }
 
 
@@ -110,6 +152,8 @@ int head_measure_distance(int direction) {
   headservo.write(constrain(direction, HEAD_MIN, HEAD_MAX));
   delay(100);
   int maesuredSum = 0;
+  bluetooth.print("hsa:");
+  bluetooth.println(headservo.read());
   
   for (int i = 0; i < DISTANCE_MEASUREMENT_SAMPLE_COUNT; i++) {
     int dist = sonar.ping_cm();
@@ -371,5 +415,7 @@ void setup() {
   pinMode(DIODE_RED_PIN, OUTPUT);
   pinMode(DIODE_BLUE_PIN, OUTPUT);
   bluetooth.write("setup done");
+  //resue timer2 via NewPing's API for speed measurement.
+  NewPing::timer_ms(stepCounterState.speedSampleInterval, opto_compute_speed);
 }
 
