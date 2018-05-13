@@ -54,7 +54,9 @@ struct CarControlData {
 
 struct CarState {
   boolean autonomousMode = false;
+  boolean enabled = false;
   boolean obstacleDetected = false;
+  boolean unableToHandleObstacles = false;
   int obstacleSolutionAttempts = 0;
   MotorState leftMotor;
   MotorState rightMotor;
